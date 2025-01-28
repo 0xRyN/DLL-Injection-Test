@@ -59,13 +59,64 @@ uint64_t GetBaseModuleAddress() {
     return (uint64_t)module;
 }
 
-void* AllocateMemoryNearAddress(void* where) {
-    return NULL;
+void* AllocatePageNearAddress(void* targetAddr)
+{
+    SYSTEM_INFO sysInfo;
+    GetSystemInfo(&sysInfo);
+    const uint64_t PAGE_SIZE = sysInfo.dwPageSize;
+
+    uint64_t startAddr = (uint64_t(targetAddr) & ~(PAGE_SIZE - 1)); //round down to nearest page boundary
+    uint64_t minAddr = min(startAddr - 0x7FFFFF00, (uint64_t)sysInfo.lpMinimumApplicationAddress);
+    uint64_t maxAddr = max(startAddr + 0x7FFFFF00, (uint64_t)sysInfo.lpMaximumApplicationAddress);
+
+    uint64_t startPage = (startAddr - (startAddr % PAGE_SIZE));
+
+    uint64_t pageOffset = 1;
+    while (1)
+    {
+        uint64_t byteOffset = pageOffset * PAGE_SIZE;
+        uint64_t highAddr = startPage + byteOffset;
+        uint64_t lowAddr = (startPage > byteOffset) ? startPage - byteOffset : 0;
+
+        bool needsExit = highAddr > maxAddr && lowAddr < minAddr;
+
+        if (highAddr < maxAddr)
+        {
+            void* outAddr = VirtualAlloc((void*)highAddr, PAGE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            if (outAddr)
+                return outAddr;
+        }
+
+        if (lowAddr > minAddr)
+        {
+            void* outAddr = VirtualAlloc((void*)lowAddr, PAGE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            if (outAddr != nullptr)
+                return outAddr;
+        }
+
+        pageOffset++;
+
+        if (needsExit)
+        {
+            break;
+        }
+    }
+
+    return nullptr;
 }
 
-void Hook_Function(uint64_t rvaFunction, void* payloadFunction) {
-    uint8_t jumpInstruction[5] = { 0xE9, 0x0, 0x0, 0x0, 0x0 };
+void WriteAbsoluteJump64(void* absJumpMemory, void* addrToJumpTo)
+{
+    uint8_t absJumpInstructions[] = { 0x49, 0xBA, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+              0x41, 0xFF, 0xE2 };
 
+    uint64_t addrToJumpTo64 = (uint64_t)addrToJumpTo;
+    memcpy(&absJumpInstructions[2], &addrToJumpTo64, sizeof(addrToJumpTo64));
+    memcpy(absJumpMemory, absJumpInstructions, sizeof(absJumpInstructions));
+}
+
+
+void Hook_Function(uint64_t rvaFunction, void* payloadFunction) {
     uint64_t baseAddress = GetBaseModuleAddress();
     if (baseAddress == 0) {
         MessageBoxA(NULL, "Failed to get base module address.", "Error!", MB_OK);
@@ -74,26 +125,15 @@ void Hook_Function(uint64_t rvaFunction, void* payloadFunction) {
 
     uint64_t originalFunction = baseAddress + rvaFunction;
 
-    char buffer[256];
-    sprintf_s(buffer, sizeof(buffer), "Original function address: 0x%llX\n", originalFunction);
-    OutputDebugStringA(buffer);
+    // Relay function, close to original function, jumps to payload
+    void* relayFunction = AllocatePageNearAddress((void*)originalFunction);
 
-    // Calculate the relative offset correctly using 64-bit arithmetic
-    int64_t distance = static_cast<int64_t>((uintptr_t)payloadFunction - (originalFunction + sizeof(jumpInstruction)));
-    if (distance < INT32_MIN || distance > INT32_MAX) {
-        MessageBoxA(NULL, "Jump offset out of 32-bit range.", "Error!", MB_OK);
-        OutputDebugStringA("Jump offset out of 32-bit range.\n");
-		// Print both addresses and distance
-		sprintf_s(buffer, sizeof(buffer), "Original function address: 0x%llX\n", originalFunction);
-		OutputDebugStringA(buffer);
-		sprintf_s(buffer, sizeof(buffer), "Payload function address: 0x%llX\n", (uintptr_t)payloadFunction);
-		OutputDebugStringA(buffer);
-		sprintf_s(buffer, sizeof(buffer), "Distance: %lld\n", distance);
-		OutputDebugStringA(buffer);
-        return;
-    }
+    WriteAbsoluteJump64(relayFunction, payloadFunction);
 
-    int32_t jumpOffset = static_cast<int32_t>(distance);
+    // Original function jumps to relay function
+    uint8_t jumpInstruction[5] = { 0xE9, 0x0, 0x0, 0x0, 0x0 };
+
+    uint64_t jumpOffset = (uint64_t)relayFunction - ((uint64_t) originalFunction + sizeof(jumpInstruction));
 
     // Copy the 32-bit offset into the jump instruction
     memcpy(&jumpInstruction[1], &jumpOffset, sizeof(jumpOffset));
@@ -107,11 +147,8 @@ void Hook_Function(uint64_t rvaFunction, void* payloadFunction) {
         return;
     }
 
-    // Write the jump instruction to the original function
+    // Write the jump instruction -> relay to the original function
     memcpy((LPVOID)originalFunction, jumpInstruction, sizeof(jumpInstruction));
-
-    // Flush instruction cache to ensure CPU sees the changes
-    FlushInstructionCache(GetCurrentProcess(), (LPCVOID)originalFunction, sizeof(jumpInstruction));
 
     // Restore the original protection
     VirtualProtect((LPVOID)originalFunction, sizeof(jumpInstruction), oldProtect, &oldProtect);
