@@ -9,14 +9,34 @@ int add(int a, int b)
 	return a + b;
 }
 
+class Person {
+public:
+	virtual void work() {
+		std::cout << "I have no work" << std::endl;
+	}
+};
+
+class ComputerScientist : public Person {
+public:
+	void work() {
+		std::cout << "I have a job, but for how long..." << std::endl;
+	}
+};
+
 int main()
 {
-	int a, b;
-	std::cout << "Enter two numbers: ";
-	std::cin >> a >> b;
-	int sum = 99;
-	sum = add(a, b);
-	std::cout << "Sum of " << a << " and " << b << " is " << sum << std::endl;
+	//int a, b;
+	//std::cout << "Enter two numbers: ";
+	//std::cin >> a >> b;
+	//int sum = 99;
+	//sum = add(a, b);
+	//std::cout << "Sum of " << a << " and " << b << " is " << sum << std::endl;
+	Person* p;
+	ComputerScientist sc; // "I have a job, but for how long..."
+	int a;
+	std::cin >> a;
+	p = &sc;
+	p->work();
 	return 0;
 }
 

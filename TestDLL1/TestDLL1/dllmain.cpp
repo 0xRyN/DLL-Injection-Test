@@ -161,15 +161,48 @@ int substract(int a, int b) {
     return a - b;
 }
 
+void HookFunction_VMT(uint64_t vmtOffset, int vmtFunctionIndex, void* payloadFunc) {
+    uint64_t baseAddress = GetBaseModuleAddress();
+    if (baseAddress == 0) {
+        MessageBoxA(NULL, "Failed to get base module address.", "Error!", MB_OK);
+        return;
+    }
+
+    uint64_t vmtAddress = baseAddress + vmtOffset;
+
+    char buf[100];
+    sprintf_s(buf, sizeof(buf), "vmtAddress: %p\n", (void*)vmtAddress);
+    OutputDebugStringA(buf);
+
+    char buf2[100];
+    sprintf_s(buf2, sizeof(buf2), "fnAddress: %p\n", payloadFunc);
+    OutputDebugStringA(buf2);
+
+    DWORD oldProtect;
+    if (!VirtualProtect((LPVOID)vmtAddress, sizeof(vmtAddress), PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        OutputDebugStringA("VirtualProtect failed.\n");
+        return;
+    }
+
+    memcpy((void*) vmtAddress, &payloadFunc, sizeof(payloadFunc));
+
+    OutputDebugStringA("VMT Hook installed successfully.\n");
+}
+
+void work() {
+    std::cout << "I am hacker! I steal your job hahaha >:)" << std::endl;
+}
+
 BOOL APIENTRY DllMain( HMODULE hModule,
                        DWORD  ul_reason_for_call,
                        LPVOID lpReserved
                      )
 {
     uint64_t addFunctionRVA = 0x12280;
+    uint64_t vmtOffset = 0x1bce0;
 
     if (ul_reason_for_call == DLL_PROCESS_ATTACH) {
-        Hook_Function(addFunctionRVA, substract);
+        HookFunction_VMT(vmtOffset, 0, work);
 		
     }
 
