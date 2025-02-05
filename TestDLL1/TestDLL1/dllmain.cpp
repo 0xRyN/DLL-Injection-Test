@@ -184,7 +184,12 @@ void HookFunction_VMT(uint64_t vmtOffset, int vmtFunctionIndex, void* payloadFun
         return;
     }
 
-    memcpy((void*) vmtAddress, &payloadFunc, sizeof(payloadFunc));
+    // Method 1: Copy pointer address (which is the address pointed by the pointer)
+    // memcpy((void*) vmtAddress, &payloadFunc, sizeof(payloadFunc));
+
+    // Method 2: Dereference and assign the pointer
+    uint64_t* entry = (uint64_t*)vmtAddress;
+    *entry = (uint64_t)payloadFunc;
 
     OutputDebugStringA("VMT Hook installed successfully.\n");
 }
